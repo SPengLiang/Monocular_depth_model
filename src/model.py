@@ -323,26 +323,6 @@ class Monocular_model(object):
         conv = self.conv(upsample, num_out_layers, kernel_size, 1)
         return conv
 
-    '''
-
-    def conv(self, x, num_out_layers, kernel_size, stride, activation_fn=tf.nn.elu):
-        p = np.floor((kernel_size - 1) / 2).astype(np.int32)
-        p_x = tf.pad(x, [[0, 0], [p, p], [p, p], [0, 0]])
-        return slim.conv2d(p_x, num_out_layers, kernel_size, stride, 'VALID', activation_fn=activation_fn)
-
-
-    def maxpool(self, x, kernel_size):
-        p = np.floor((kernel_size - 1) / 2).astype(np.int32)
-        p_x = tf.pad(x, [[0, 0], [p, p], [p, p], [0, 0]])
-        return slim.max_pool2d(p_x, kernel_size)
-
-
-    def upconv(self, x, num_out_layers, kernel_size, scale):
-        p_x = tf.pad(x, [[0, 0], [1, 1], [1, 1], [0, 0]])
-        conv = slim.conv2d_transpose(p_x, num_out_layers, kernel_size, scale, 'SAME')
-        return conv[:, 3:-1, 3:-1, :]
-    '''
-
     def upsample_nn(self, x, ratio):
         return tf.image.resize_nearest_neighbor(x, [tf.shape(x)[1] * ratio, tf.shape(x)[2] * ratio])
 

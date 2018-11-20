@@ -6,6 +6,7 @@ import cv2 as cv
 import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
+import time
 
 from model import *
 
@@ -49,12 +50,27 @@ right_dir = r'D:\stereo\stereo\KITTI_data\data_scene_flow_multiview\training\ima
 left_file_dir.extend([os.path.join(left_dir, left) for left in os.listdir(left_dir)])
 right_file_dir.extend([os.path.join(right_dir, right) for right in os.listdir(right_dir)])
 
-test_left_file_dir = [r'D:\stereo\stereo\KITTI_data\data_scene_flow_multiview\training\image_2\000000_00.png']
+test_left_file_dir = [r'D:\stereo\stereo\KITTI_data\data_scene_flow_multiview\training\image_2\000000_00.png',
+                      r'D:\stereo\stereo\KITTI_data\data_scene_flow_multiview\training\image_2\000000_01.png',
+                      r'D:\stereo\stereo\KITTI_data\data_scene_flow_multiview\training\image_2\000000_02.png',
+                      r'D:\stereo\stereo\KITTI_data\data_scene_flow_multiview\training\image_2\000000_03.png',
+                      r'D:\stereo\stereo\KITTI_data\data_scene_flow_multiview\training\image_2\000000_04.png',
+                      r'D:\stereo\stereo\KITTI_data\data_scene_flow_multiview\training\image_2\000000_05.png',
+                      r'D:\stereo\stereo\KITTI_data\data_scene_flow_multiview\training\image_2\000000_06.png',
+                      r'D:\stereo\stereo\KITTI_data\data_scene_flow_multiview\training\image_2\000000_07.png',
+                      r'D:\stereo\stereo\KITTI_data\data_scene_flow_multiview\training\image_2\000000_08.png',
+                      r'D:\stereo\stereo\KITTI_data\data_scene_flow_multiview\training\image_2\000000_09.png',
+                      r'D:\stereo\stereo\KITTI_data\data_scene_flow_multiview\training\image_2\000000_10.png',
+                      r'D:\stereo\stereo\KITTI_data\data_scene_flow_multiview\training\image_2\000000_11.png',
+                      r'D:\stereo\stereo\KITTI_data\data_scene_flow_multiview\training\image_2\000000_12.png',
+                      r'D:\stereo\stereo\KITTI_data\data_scene_flow_multiview\training\image_2\000000_13.png',
+                      r'D:\stereo\stereo\KITTI_data\data_scene_flow_multiview\training\image_2\000000_14.png',
+                      r'D:\stereo\stereo\KITTI_data\data_scene_flow_multiview\training\image_2\000000_15.png']
 
 def post_process_disparity(disp):
-    _, h, w = disp.shape
-    l_disp = disp[0,:,:]
-    r_disp = np.fliplr(disp[1,:,:])
+    h, w, _ = disp.shape
+    l_disp = disp[:,:, 0]
+    r_disp = np.fliplr(disp[:,:, 1])
     m_disp = 0.5 * (l_disp + r_disp)
     l, _ = np.meshgrid(np.linspace(0, 1, w), np.linspace(0, 1, h))
     l_mask = 1.0 - np.clip(20 * (l - 0.05), 0, 1)
@@ -86,7 +102,7 @@ def train(params, batch_size, height, width, learning_rate):
     left_data = tf.placeholder(tf.float32, shape=(batch_size, height, width, 3))
     right_data = tf.placeholder(tf.float32, shape=(batch_size, height, width, 3))
 
-    model = Monocular_model(params, mode, left_data, right_data)
+    model = Monocular_model(params, 'train', left_data, right_data)
 
     with tf.Session() as sess:
         loss = model.total_loss
@@ -125,26 +141,46 @@ def test(params, batch_size, height, width):
     left_data = tf.placeholder(tf.float32, shape=(batch_size, height, width, 3))
     right_data = tf.placeholder(tf.float32, shape=(batch_size, height, width, 3))
 
-    model = Monocular_model(params, mode, left_data, right_data)
+    model = Monocular_model(params, 'test', left_data, right_data)
 
     with tf.Session() as sess:
 
         steps = len(test_left_file_dir) // batch_size
 
         saver = tf.train.Saver()
-        saver.restore(sess, './tmp/model_ver0.1')
+        saver.restore(sess, '../tmp/model_ver0.1')
+
 
         for iteration in range(steps):
-            left_batch = get_batch_pic(0, batch_size, test_left_file_dir, None, "test")
-            outputs = ((model.disp_left_est[0]).eval(feed_dict={model.left_pic: left_batch})).squeeze()
+            start1 = time.clock()
+            left_batch = get_batch_pic(iteration, batch_size, test_left_file_dir, None, "test")
 
-            min_disp = np.min(outputs)
-            max_disp = np.max(outputs)
-            new_disp = ((outputs - min_disp) / (max_disp - min_disp) * 255).astype(np.uint8)
-            cv.imshow("new_disp", cv.resize(new_disp, (1242, 375), interpolation=cv.INTER_CUBIC))
+            start = time.clock()
+            outputs = np.array(((model.disp_est[0]).eval(feed_dict={model.left_pic: left_batch})).squeeze())
+            disp_pp = post_process_disparity(outputs)
+
+
+            end = time.clock()
+            print("time:  ", end - start)
+            min_disp = np.min(disp_pp)
+            max_disp = np.max(disp_pp)
+            new_disp = ((disp_pp - min_disp) / (max_disp - min_disp) * 255).astype(np.uint8)
+
+            new_disp = cv.resize(new_disp, (1242, 375), interpolation=cv.INTER_CUBIC)
+            src_RGB = cv.applyColorMap(new_disp, cv.COLORMAP_JET)
+            cv.imshow("new_disp", src_RGB)
+
+            min_disp = np.min(outputs[:, :, 0])
+            max_disp = np.max(outputs[:, :, 0])
+            new_disp = ((outputs[:, :, 0] - min_disp) / (max_disp - min_disp) * 255).astype(np.uint8)
+
+            new_disp = cv.resize(new_disp, (1242, 375), interpolation=cv.INTER_CUBIC)
+            src_RGB = cv.applyColorMap(new_disp, cv.COLORMAP_JET)
+            cv.imshow("new_disp2", src_RGB)
             cv.waitKey(0)
 
 
 if __name__ == "__main__":
-    train(params, 4, 256, 512, 0.0001)
     test(params, 1, 256, 512)
+
+    train(params, 4, 256, 512, 0.0001)
