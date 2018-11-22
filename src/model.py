@@ -7,107 +7,6 @@ import tensorflow.contrib.slim as slim
 from collections import namedtuple
 import cv2 as cv
 
-'''
-def bilinear_sample(org_batch_pic, disp):
-
-    num_batch = tf.shape(org_batch_pic)[0]
-    height_f = tf.cast(tf.shape(org_batch_pic)[1], tf.float32)
-    width_f = tf.cast(tf.shape(org_batch_pic)[2], tf.float32)
-    num_chnnel = tf.shape(org_batch_pic)[3]
-
-    return
-'''
-
-monodepth_parameters = namedtuple('parameters',
-                                  'encoder, '
-                                  'height, width, '
-                                  'batch_size, '
-                                  'num_threads, '
-                                  'num_epochs, '
-                                  'do_stereo, '
-                                  'wrap_mode, '
-                                  'use_deconv, '
-                                  'alpha_image_loss, '
-                                  'disp_gradient_loss_weight, '
-                                  'lr_loss_weight, '
-                                  'full_summary')
-
-
-def bilinear_sampler(input_images, x_offset, wrap_mode='border', name='bilinear_sampler', **kwargs):
-    def _repeat(x, n_repeats):
-        with tf.name_scope('_repeat'):
-            rep = tf.tile(tf.expand_dims(x, 1), [1, n_repeats])
-            return tf.reshape(rep, [-1])
-
-    def _interpolate(im, x, y):
-        with tf.name_scope('_interpolate'):
-            im = tf.pad(im, [[0, 0], [1, 1], [1, 1], [0, 0]], mode='CONSTANT')
-            x = x + 1
-            y = y + 1
-
-            x = tf.clip_by_value(x, 0.0, _width_f - 1 + 2 * 1)
-
-            x0_f = tf.floor(x)
-            y0_f = tf.floor(y)
-            x1_f = x0_f + 1
-
-            x0 = tf.cast(x0_f, tf.int32)
-            y0 = tf.cast(y0_f, tf.int32)
-            x1 = tf.cast(tf.minimum(x1_f, _width_f - 1 + 2 * 1), tf.int32)
-
-            dim2 = (_width + 2 * 1)
-            dim1 = (_width + 2 * 1) * (_height + 2 * 1)
-            base = _repeat(tf.range(_num_batch) * dim1, _height * _width)
-            base_y0 = base + y0 * dim2
-            idx_l = base_y0 + x0
-            idx_r = base_y0 + x1
-
-            im_flat = tf.reshape(im, tf.stack([-1, _num_channels]))
-
-            pix_l = tf.gather(im_flat, idx_l)
-            pix_r = tf.gather(im_flat, idx_r)
-
-            weight_l = tf.expand_dims(x1_f - x, 1)
-            weight_r = tf.expand_dims(x - x0_f, 1)
-
-            return weight_l * pix_l + weight_r * pix_r
-
-    def _transform(input_images, x_offset):
-        with tf.name_scope('transform'):
-            x_t, y_t = tf.meshgrid(tf.linspace(0.0, _width_f - 1.0, _width),
-                                   tf.linspace(0.0, _height_f - 1.0, _height))
-
-            x_t_flat = tf.reshape(x_t, (1, -1))
-            y_t_flat = tf.reshape(y_t, (1, -1))
-
-            x_t_flat = tf.tile(x_t_flat, tf.stack([_num_batch, 1]))
-            y_t_flat = tf.tile(y_t_flat, tf.stack([_num_batch, 1]))
-
-            x_t_flat = tf.reshape(x_t_flat, [-1])
-            y_t_flat = tf.reshape(y_t_flat, [-1])
-
-            x_t_flat = x_t_flat + tf.reshape(x_offset, [-1]) * _width_f
-
-            input_transformed = _interpolate(input_images, x_t_flat, y_t_flat)
-
-            output = tf.reshape(
-                input_transformed, tf.stack([_num_batch, _height, _width, _num_channels]))
-            return output
-
-    with tf.variable_scope(name):
-        _num_batch = tf.shape(input_images)[0]
-        _height = tf.shape(input_images)[1]
-        _width = tf.shape(input_images)[2]
-        _num_channels = tf.shape(input_images)[3]
-
-        _height_f = tf.cast(_height, tf.float32)
-        _width_f = tf.cast(_width, tf.float32)
-
-        _wrap_mode = wrap_mode
-
-        output = _transform(input_images, x_offset)
-        return output
-
 
 class Monocular_model(object):
     def __init__(self, params, mode, left_pic, right_pic):
@@ -177,7 +76,7 @@ class Monocular_model(object):
         with slim.arg_scope([slim.conv2d, slim.conv2d_transpose], activation_fn=tf.nn.elu):
             with tf.name_scope('model'):
 
-                if self.params.do_stereo:
+                if self.params['do_stereo']:
                     self.input = tf.concat([self.left_pic, self.right_pic], 3)
                 else:
                     self.input = self.left_pic
@@ -224,43 +123,41 @@ class Monocular_model(object):
 
     def total_loss(self):
         with tf.name_scope('losses'):
-            # IMAGE RECONSTRUCTION
-            # L1
             self.l1_left = [tf.abs(self.left_est[i] - self.left_pyramid[i]) for i in range(4)]
             self.l1_reconstruction_loss_left = [tf.reduce_mean(l) for l in self.l1_left]
             self.l1_right = [tf.abs(self.right_est[i] - self.right_pyramid[i]) for i in range(4)]
             self.l1_reconstruction_loss_right = [tf.reduce_mean(l) for l in self.l1_right]
 
-            # SSIM
+
             self.ssim_left = [self.SSIM(self.left_est[i], self.left_pyramid[i]) for i in range(4)]
             self.ssim_loss_left = [tf.reduce_mean(s) for s in self.ssim_left]
             self.ssim_right = [self.SSIM(self.right_est[i], self.right_pyramid[i]) for i in range(4)]
             self.ssim_loss_right = [tf.reduce_mean(s) for s in self.ssim_right]
 
-            # WEIGTHED SUM
+
             self.image_loss_right = [
-                self.params.alpha_image_loss * self.ssim_loss_right[i] + (1 - self.params.alpha_image_loss) *
+                self.params['alpha_image_loss'] * self.ssim_loss_right[i] + (1 - self.params['alpha_image_loss']) *
                 self.l1_reconstruction_loss_right[i] for i in range(4)]
             self.image_loss_left = [
-                self.params.alpha_image_loss * self.ssim_loss_left[i] + (1 - self.params.alpha_image_loss) *
+                self.params['alpha_image_loss'] * self.ssim_loss_left[i] + (1 - self.params['alpha_image_loss']) *
                 self.l1_reconstruction_loss_left[i] for i in range(4)]
             self.image_loss = tf.add_n(self.image_loss_left + self.image_loss_right)
 
-            # DISPARITY SMOOTHNESS
+
             self.disp_left_loss = [tf.reduce_mean(tf.abs(self.disp_left_smoothness[i])) / 2 ** i for i in range(4)]
             self.disp_right_loss = [tf.reduce_mean(tf.abs(self.disp_right_smoothness[i])) / 2 ** i for i in
                                     range(4)]
             self.disp_gradient_loss = tf.add_n(self.disp_left_loss + self.disp_right_loss)
 
-            # LR CONSISTENCY
+
             self.lr_left_loss = [tf.reduce_mean(tf.abs(self.right_to_left_disp[i] - self.disp_left_est[i])) for i in
                                  range(4)]
             self.lr_right_loss = [tf.reduce_mean(tf.abs(self.left_to_right_disp[i] - self.disp_right_est[i])) for i
                                   in range(4)]
             self.lr_loss = tf.add_n(self.lr_left_loss + self.lr_right_loss)
 
-            # TOTAL LOSS
-            self.total_loss = self.image_loss + self.params.disp_gradient_loss_weight * self.disp_gradient_loss + self.params.lr_loss_weight * self.lr_loss
+
+            self.total_loss = self.image_loss + self.params['disp_gradient_loss_weight'] * self.disp_gradient_loss + self.params['lr_loss_weight'] * self.lr_loss
 
     def gradient_x(self, img):
         return img[:, :, :-1, :] - img[:, :, 1:, :]
@@ -345,3 +242,79 @@ class Monocular_model(object):
     def get_disp(self, x):
         disp = 0.3 * self.conv(x, 2, 3, 1, tf.nn.sigmoid)
         return disp
+
+
+def bilinear_sampler(input_images, x_offset, wrap_mode='border', name='bilinear_sampler', **kwargs):
+    def _repeat(x, n_repeats):
+        with tf.name_scope('_repeat'):
+            rep = tf.tile(tf.expand_dims(x, 1), [1, n_repeats])
+            return tf.reshape(rep, [-1])
+
+    def _interpolate(im, x, y):
+        with tf.name_scope('_interpolate'):
+            im = tf.pad(im, [[0, 0], [1, 1], [1, 1], [0, 0]], mode='CONSTANT')
+            x = x + 1
+            y = y + 1
+
+            x = tf.clip_by_value(x, 0.0, _width_f - 1 + 2 * 1)
+
+            x0_f = tf.floor(x)
+            y0_f = tf.floor(y)
+            x1_f = x0_f + 1
+
+            x0 = tf.cast(x0_f, tf.int32)
+            y0 = tf.cast(y0_f, tf.int32)
+            x1 = tf.cast(tf.minimum(x1_f, _width_f - 1 + 2 * 1), tf.int32)
+
+            dim2 = (_width + 2 * 1)
+            dim1 = (_width + 2 * 1) * (_height + 2 * 1)
+            base = _repeat(tf.range(_num_batch) * dim1, _height * _width)
+            base_y0 = base + y0 * dim2
+            idx_l = base_y0 + x0
+            idx_r = base_y0 + x1
+
+            im_flat = tf.reshape(im, tf.stack([-1, _num_channels]))
+
+            pix_l = tf.gather(im_flat, idx_l)
+            pix_r = tf.gather(im_flat, idx_r)
+
+            weight_l = tf.expand_dims(x1_f - x, 1)
+            weight_r = tf.expand_dims(x - x0_f, 1)
+
+            return weight_l * pix_l + weight_r * pix_r
+
+    def _transform(input_images, x_offset):
+        with tf.name_scope('transform'):
+            x_t, y_t = tf.meshgrid(tf.linspace(0.0, _width_f - 1.0, _width),
+                                   tf.linspace(0.0, _height_f - 1.0, _height))
+
+            x_t_flat = tf.reshape(x_t, (1, -1))
+            y_t_flat = tf.reshape(y_t, (1, -1))
+
+            x_t_flat = tf.tile(x_t_flat, tf.stack([_num_batch, 1]))
+            y_t_flat = tf.tile(y_t_flat, tf.stack([_num_batch, 1]))
+
+            x_t_flat = tf.reshape(x_t_flat, [-1])
+            y_t_flat = tf.reshape(y_t_flat, [-1])
+
+            x_t_flat = x_t_flat + tf.reshape(x_offset, [-1]) * _width_f
+
+            input_transformed = _interpolate(input_images, x_t_flat, y_t_flat)
+
+            output = tf.reshape(
+                input_transformed, tf.stack([_num_batch, _height, _width, _num_channels]))
+            return output
+
+    with tf.variable_scope(name):
+        _num_batch = tf.shape(input_images)[0]
+        _height = tf.shape(input_images)[1]
+        _width = tf.shape(input_images)[2]
+        _num_channels = tf.shape(input_images)[3]
+
+        _height_f = tf.cast(_height, tf.float32)
+        _width_f = tf.cast(_width, tf.float32)
+
+        _wrap_mode = wrap_mode
+
+        output = _transform(input_images, x_offset)
+        return output
